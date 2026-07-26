@@ -33,6 +33,10 @@ jobs:
           cp -r /tmp/src/lib .
           cp /tmp/src/pubspec.yaml .
 
+      - name: Add internet permission
+        run: |
+          sed -i 's|<application|<uses-permission android:name="android.permission.INTERNET"/><application|' android/app/src/main/AndroidManifest.xml
+
       - name: Install dependencies
         run: flutter pub get
 
