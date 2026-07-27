@@ -135,4 +135,605 @@ class _HomePageState extends State<HomePage> {
     });
   }
 
-  Future
+  Future<void> _toggleFavorite(String id) async {
+    final prefs = await SharedPreferences.getInstance();
+    setState(() {
+      if (_favorites.contains(id)) {
+        _favorites.remove(id);
+      } else {
+        _favorites.add(id);
+      }
+    });
+    await prefs.setStringList('favorites', _favorites.toList());
+    _applyFilter();
+  }
+
+  Future<void> _fetchCoins({bool silent = false}) async {
+    if (!silent) {
+      setState(() {
+        _loading = true;
+        _error = null;
+      });
+    }
+    try {
+      final url = Uri.parse(
+        'https://api.coingecko.com/api/v3/coins/markets'
+        '?vs_currency=idr&order=market_cap_desc&per_page=50&page=1'
+        '&price_change_percentage=24h',
+      );
+      final res = await http.get(url).timeout(const Duration(seconds: 20));
+      if (res.statusCode == 200) {
+        final List data = jsonDecode(res.body);
+        setState(() {
+          _coins = data.map((e) => Coin.fromJson(e)).toList();
+          _loading = false;
+          _error = null;
+          _lastUpdate = DateTime.now();
+        });
+        _applyFilter();
+      } else if (!silent) {
+        setState(() {
+          _error = 'Server error (${res.statusCode}). Coba lagi sebentar.';
+          _loading = false;
+        });
+      }
+    } catch (e) {
+      if (!silent) {
+        setState(() {
+          _error = 'Gagal memuat data. Cek koneksi internet kamu.';
+          _loading = false;
+        });
+      }
+    }
+  }
+
+  void _applyFilter() {
+    final q = _searchCtrl.text.toLowerCase();
+    var list = q.isEmpty
+        ? List<Coin>.from(_coins)
+        : _coins
+            .where((c) =>
+                c.name.toLowerCase().contains(q) ||
+                c.symbol.toLowerCase().contains(q))
+            .toList();
+    list.sort((a, b) {
+      final favA = _favorites.contains(a.id) ? 0 : 1;
+      final favB = _favorites.contains(b.id) ? 0 : 1;
+      return favA.compareTo(favB);
+    });
+    setState(() => _filtered = list);
+  }
+
+  String get _updateLabel {
+    if (_lastUpdate == null) return '';
+    final t = _lastUpdate!;
+    String two(int n) => n.toString().padLeft(2, '0');
+    return 'Update ${two(t.hour)}:${two(t.minute)}:${two(t.second)}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Crypto ke IDR',
+            style: TextStyle(fontWeight: FontWeight.bold)),
+        actions: [
+          IconButton(
+            onPressed: () => _fetchCoins(),
+            icon: const Icon(Icons.refresh),
+          ),
+        ],
+      ),
+      body: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 12, 12, 4),
+            child: TextField(
+              controller: _searchCtrl,
+              decoration: InputDecoration(
+                hintText: 'Cari coin... (BTC, Ethereum, dll)',
+                prefixIcon: const Icon(Icons.search),
+                filled: true,
+                fillColor: const Color(0xFF161B22),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide.none,
+                ),
+              ),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+            child: Row(
+              children: [
+                Container(
+                  width: 8,
+                  height: 8,
+                  decoration: const BoxDecoration(
+                    color: Colors.greenAccent,
+                    shape: BoxShape.circle,
+                  ),
+                ),
+                const SizedBox(width: 6),
+                const Text('LIVE',
+                    style: TextStyle(
+                        color: Colors.greenAccent,
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold)),
+                const Spacer(),
+                Text(_updateLabel,
+                    style:
+                        const TextStyle(color: Colors.grey, fontSize: 11)),
+              ],
+            ),
+          ),
+          Expanded(child: _buildBody()),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildBody() {
+    if (_loading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    if (_error != null) {
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(_error!, textAlign: TextAlign.center),
+            const SizedBox(height: 12),
+            ElevatedButton(
+              onPressed: () => _fetchCoins(),
+              child: const Text('Coba Lagi'),
+            ),
+          ],
+        ),
+      );
+    }
+    return RefreshIndicator(
+      onRefresh: () => _fetchCoins(),
+      child: ListView.builder(
+        itemCount: _filtered.length,
+        itemBuilder: (context, i) {
+          final c = _filtered[i];
+          final up = c.change24h >= 0;
+          final isFav = _favorites.contains(c.id);
+          return ListTile(
+            leading: ClipRRect(
+              borderRadius: BorderRadius.circular(20),
+              child: Image.network(
+                c.image,
+                width: 36,
+                height: 36,
+                errorBuilder: (_, __, ___) =>
+                    const Icon(Icons.currency_bitcoin, size: 36),
+              ),
+            ),
+            title: Text(c.name,
+                style: const TextStyle(fontWeight: FontWeight.w600)),
+            subtitle: Text(c.symbol,
+                style: const TextStyle(color: Colors.grey)),
+            trailing: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Text(formatIdr(c.priceIdr),
+                        style:
+                            const TextStyle(fontWeight: FontWeight.bold)),
+                    Text(
+                      '${up ? '+' : ''}${c.change24h.toStringAsFixed(2)}%',
+                      style: TextStyle(
+                        color:
+                            up ? Colors.greenAccent : Colors.redAccent,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
+                ),
+                IconButton(
+                  icon: Icon(
+                    isFav ? Icons.star : Icons.star_border,
+                    color: isFav ? const Color(0xFFF0B90B) : Colors.grey,
+                    size: 22,
+                  ),
+                  onPressed: () => _toggleFavorite(c.id),
+                ),
+              ],
+            ),
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => DetailPage(coin: c),
+                ),
+              );
+            },
+          );
+        },
+      ),
+    );
+  }
+}
+
+class DetailPage extends StatefulWidget {
+  final Coin coin;
+
+  const DetailPage({super.key, required this.coin});
+
+  @override
+  State<DetailPage> createState() => _DetailPageState();
+}
+
+class _DetailPageState extends State<DetailPage> {
+  final _cryptoCtrl = TextEditingController(text: '1');
+  final _idrCtrl = TextEditingController();
+  bool _syncing = false;
+
+  final List<Map<String, String>> _timeframes = [
+    {'label': '1D', 'days': '1'},
+    {'label': '7D', 'days': '7'},
+    {'label': '1M', 'days': '30'},
+    {'label': '3M', 'days': '90'},
+    {'label': '1Y', 'days': '365'},
+    {'label': 'All', 'days': 'max'},
+  ];
+  String _selectedDays = '1';
+
+  final Map<String, List<double>> _chartCache = {};
+  List<double>? _chartData;
+  bool _chartLoading = true;
+  String? _chartError;
+
+  @override
+  void initState() {
+    super.initState();
+    _idrCtrl.text = widget.coin.priceIdr
+        .toStringAsFixed(widget.coin.priceIdr < 100 ? 2 : 0);
+    _cryptoCtrl.addListener(_fromCrypto);
+    _idrCtrl.addListener(_fromIdr);
+    _fetchChart();
+  }
+
+  @override
+  void dispose() {
+    _cryptoCtrl.dispose();
+    _idrCtrl.dispose();
+    super.dispose();
+  }
+
+  void _fromCrypto() {
+    if (_syncing) return;
+    _syncing = true;
+    final amount =
+        double.tryParse(_cryptoCtrl.text.replaceAll(',', '.')) ?? 0;
+    final idr = amount * widget.coin.priceIdr;
+    _idrCtrl.text = idr == 0 ? '' : idr.toStringAsFixed(idr < 100 ? 2 : 0);
+    _syncing = false;
+    setState(() {});
+  }
+
+  void _fromIdr() {
+    if (_syncing) return;
+    _syncing = true;
+    final idr = double.tryParse(_idrCtrl.text.replaceAll(',', '.')) ?? 0;
+    final amount =
+        widget.coin.priceIdr == 0 ? 0.0 : idr / widget.coin.priceIdr;
+    _cryptoCtrl.text = amount == 0 ? '' : amount.toStringAsFixed(8);
+    _syncing = false;
+    setState(() {});
+  }
+
+  Future<void> _fetchChart() async {
+    if (_chartCache.containsKey(_selectedDays)) {
+      setState(() {
+        _chartData = _chartCache[_selectedDays];
+        _chartLoading = false;
+        _chartError = null;
+      });
+      return;
+    }
+    setState(() {
+      _chartLoading = true;
+      _chartError = null;
+    });
+    try {
+      final url = Uri.parse(
+        'https://api.coingecko.com/api/v3/coins/${widget.coin.id}/market_chart'
+        '?vs_currency=idr&days=$_selectedDays',
+      );
+      final res = await http.get(url).timeout(const Duration(seconds: 20));
+      if (res.statusCode == 200) {
+        final data = jsonDecode(res.body);
+        final List prices = data['prices'] ?? [];
+        final points =
+            prices.map<double>((p) => (p[1] as num).toDouble()).toList();
+        _chartCache[_selectedDays] = points;
+        setState(() {
+          _chartData = points;
+          _chartLoading = false;
+        });
+      } else if (res.statusCode == 429) {
+        setState(() {
+          _chartError =
+              'Terlalu banyak request. Tunggu sebentar lalu coba lagi.';
+          _chartLoading = false;
+        });
+      } else {
+        setState(() {
+          _chartError = 'Gagal memuat grafik (${res.statusCode}).';
+          _chartLoading = false;
+        });
+      }
+    } catch (e) {
+      setState(() {
+        _chartError = 'Gagal memuat grafik. Cek koneksi kamu.';
+        _chartLoading = false;
+      });
+    }
+  }
+
+  double get _rangeChange {
+    if (_chartData == null || _chartData!.length < 2) return 0;
+    final first = _chartData!.first;
+    final last = _chartData!.last;
+    if (first == 0) return 0;
+    return (last - first) / first * 100;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = widget.coin;
+    final up = _rangeChange >= 0;
+    final chartColor = up ? Colors.greenAccent : Colors.redAccent;
+
+    return Scaffold(
+      appBar: AppBar(
+        title: Row(
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(14),
+              child: Image.network(
+                c.image,
+                width: 28,
+                height: 28,
+                errorBuilder: (_, __, ___) =>
+                    const Icon(Icons.currency_bitcoin, size: 28),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Text(c.symbol),
+          ],
+        ),
+      ),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(c.name,
+                style: const TextStyle(fontSize: 16, color: Colors.grey)),
+            const SizedBox(height: 4),
+            Text(
+              formatIdr(c.priceIdr),
+              style: const TextStyle(
+                  fontSize: 28, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 4),
+            if (!_chartLoading && _chartData != null)
+              Text(
+                '${up ? '+' : ''}${_rangeChange.toStringAsFixed(2)}%  (${_timeframes.firstWhere((t) => t['days'] == _selectedDays)['label']})',
+                style: TextStyle(
+                    color: chartColor, fontWeight: FontWeight.w600),
+              ),
+            const SizedBox(height: 16),
+            SizedBox(
+              height: 220,
+              child: _buildChart(chartColor),
+            ),
+            const SizedBox(height: 8),
+            if (!_chartLoading &&
+                _chartData != null &&
+                _chartData!.isNotEmpty)
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    'Low: ${formatIdrShort(_chartData!.reduce((a, b) => a < b ? a : b))}',
+                    style: const TextStyle(
+                        color: Colors.redAccent, fontSize: 12),
+                  ),
+                  Text(
+                    'High: ${formatIdrShort(_chartData!.reduce((a, b) => a > b ? a : b))}',
+                    style: const TextStyle(
+                        color: Colors.greenAccent, fontSize: 12),
+                  ),
+                ],
+              ),
+            const SizedBox(height: 12),
+            SizedBox(
+              height: 40,
+              child: ListView(
+                scrollDirection: Axis.horizontal,
+                children: _timeframes.map((t) {
+                  final selected = t['days'] == _selectedDays;
+                  return Padding(
+                    padding: const EdgeInsets.only(right: 8),
+                    child: ChoiceChip(
+                      label: Text(t['label']!),
+                      selected: selected,
+                      selectedColor: const Color(0xFFF0B90B),
+                      labelStyle: TextStyle(
+                        color: selected ? Colors.black : Colors.white,
+                        fontWeight: FontWeight.w600,
+                      ),
+                      onSelected: (_) {
+                        setState(() => _selectedDays = t['days']!);
+                        _fetchChart();
+                      },
+                    ),
+                  );
+                }).toList(),
+              ),
+            ),
+            const SizedBox(height: 24),
+            Text('Jumlah ${c.symbol}',
+                style: const TextStyle(color: Colors.grey)),
+            const SizedBox(height: 8),
+            TextField(
+              controller: _cryptoCtrl,
+              keyboardType:
+                  const TextInputType.numberWithOptions(decimal: true),
+              style: const TextStyle(fontSize: 22),
+              decoration: InputDecoration(
+                filled: true,
+                fillColor: const Color(0xFF161B22),
+                suffixText: c.symbol,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide.none,
+                ),
+              ),
+            ),
+            const SizedBox(height: 8),
+            const Center(
+              child: Icon(Icons.swap_vert, color: Colors.grey),
+            ),
+            const SizedBox(height: 8),
+            const Text('Jumlah Rupiah',
+                style: TextStyle(color: Colors.grey)),
+            const SizedBox(height: 8),
+            TextField(
+              controller: _idrCtrl,
+              keyboardType:
+                  const TextInputType.numberWithOptions(decimal: true),
+              style: const TextStyle(fontSize: 22),
+              decoration: InputDecoration(
+                filled: true,
+                fillColor: const Color(0xFF161B22),
+                prefixText: 'Rp ',
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide.none,
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+            OutlinedButton.icon(
+              onPressed: () {
+                final text =
+                    '${_cryptoCtrl.text} ${c.symbol} = Rp ${_idrCtrl.text}';
+                Clipboard.setData(ClipboardData(text: text));
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                      content: Text('Hasil disalin ke clipboard')),
+                );
+              },
+              icon: const Icon(Icons.copy, size: 18),
+              label: const Text('Salin Hasil'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildChart(Color color) {
+    if (_chartLoading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    if (_chartError != null) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Text(_chartError!,
+                textAlign: TextAlign.center,
+                style: const TextStyle(fontSize: 13)),
+            const SizedBox(height: 8),
+            OutlinedButton(
+              onPressed: _fetchChart,
+              child: const Text('Coba Lagi'),
+            ),
+          ],
+        ),
+      );
+    }
+    if (_chartData == null || _chartData!.length < 2) {
+      return const Center(child: Text('Data grafik tidak tersedia'));
+    }
+    return CustomPaint(
+      painter: LineChartPainter(data: _chartData!, color: color),
+      child: Container(),
+    );
+  }
+}
+
+class LineChartPainter extends CustomPainter {
+  final List<double> data;
+  final Color color;
+
+  LineChartPainter({required this.data, required this.color});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (data.length < 2) return;
+
+    final minV = data.reduce((a, b) => a < b ? a : b);
+    final maxV = data.reduce((a, b) => a > b ? a : b);
+    final range = (maxV - minV) == 0 ? 1.0 : (maxV - minV);
+
+    final gridPaint = Paint()
+      ..color = Colors.white.withOpacity(0.06)
+      ..strokeWidth = 1;
+    for (int i = 1; i < 4; i++) {
+      final y = size.height / 4 * i;
+      canvas.drawLine(Offset(0, y), Offset(size.width, y), gridPaint);
+    }
+
+    final path = Path();
+    final fillPath = Path();
+    for (int i = 0; i < data.length; i++) {
+      final x = size.width * i / (data.length - 1);
+      final y =
+          size.height - ((data[i] - minV) / range) * size.height * 0.92 -
+              size.height * 0.04;
+      if (i == 0) {
+        path.moveTo(x, y);
+        fillPath.moveTo(x, size.height);
+        fillPath.lineTo(x, y);
+      } else {
+        path.lineTo(x, y);
+        fillPath.lineTo(x, y);
+      }
+    }
+    fillPath.lineTo(size.width, size.height);
+    fillPath.close();
+
+    final fillPaint = Paint()
+      ..shader = LinearGradient(
+        begin: Alignment.topCenter,
+        end: Alignment.bottomCenter,
+        colors: [
+          color.withOpacity(0.30),
+          color.withOpacity(0.0),
+        ],
+      ).createShader(Rect.fromLTWH(0, 0, size.width, size.height));
+    canvas.drawPath(fillPath, fillPaint);
+
+    final linePaint = Paint()
+      ..color = color
+      ..strokeWidth = 2
+      ..style = PaintingStyle.stroke
+      ..strokeCap = StrokeCap.round;
+    canvas.drawPath(path, linePaint);
+  }
+
+  @override
+  bool shouldRepaint(covariant LineChartPainter old) =>
+      old.data != data || old.color != color;
+}
