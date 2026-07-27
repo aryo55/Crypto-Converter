@@ -1,7 +1,7 @@
 name: crypto_converter
 description: Konversi harga crypto ke Rupiah (IDR) secara real-time.
 publish_to: 'none'
-version: 1.0.0+1
+version: 1.1.0+2
 
 environment:
   sdk: '>=3.0.0 <4.0.0'
@@ -10,6 +10,7 @@ dependencies:
   flutter:
     sdk: flutter
   http: ^1.2.0
+  shared_preferences: ^2.2.0
   cupertino_icons: ^1.0.6
 
 dev_dependencies:
