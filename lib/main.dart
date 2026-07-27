@@ -15,7 +15,7 @@ class CryptoConverterApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Crypto ke IDR',
+      title: 'Crypto Converter',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         brightness: Brightness.dark,
@@ -35,7 +35,21 @@ class CryptoConverterApp extends StatelessWidget {
   }
 }
 
-String formatIdr(double value) {
+String formatCurrency(double value, String currency) {
+  if (currency == 'usd') {
+    final isSmall = value < 1;
+    final s = value.toStringAsFixed(isSmall ? 6 : 2);
+    final parts = s.split('.');
+    final buf = StringBuffer();
+    final digits = parts[0];
+    for (int i = 0; i < digits.length; i++) {
+      buf.write(digits[i]);
+      final remaining = digits.length - i - 1;
+      if (remaining > 0 && remaining % 3 == 0) buf.write(',');
+    }
+    return '\$${buf.toString()}.${parts[1]}';
+  }
+  // IDR
   final isSmall = value < 100;
   final s = value.toStringAsFixed(isSmall ? 2 : 0);
   final parts = s.split('.');
@@ -51,15 +65,16 @@ String formatIdr(double value) {
   return out;
 }
 
-String formatIdrShort(double value) {
+String formatCurrencyShort(double value, String currency) {
+  final symbol = currency == 'usd' ? '\$' : 'Rp ';
   if (value >= 1000000000) {
-    return 'Rp ${(value / 1000000000).toStringAsFixed(2)} M';
+    return '$symbol${(value / 1000000000).toStringAsFixed(2)} M';
   } else if (value >= 1000000) {
-    return 'Rp ${(value / 1000000).toStringAsFixed(2)} jt';
+    return '$symbol${(value / 1000000).toStringAsFixed(2)} jt';
   } else if (value >= 1000) {
-    return 'Rp ${(value / 1000).toStringAsFixed(1)} rb';
+    return '$symbol${(value / 1000).toStringAsFixed(1)} rb';
   }
-  return 'Rp ${value.toStringAsFixed(value < 100 ? 2 : 0)}';
+  return '$symbol${value.toStringAsFixed(value < 100 ? 2 : 0)}';
 }
 
 class Coin {
@@ -67,7 +82,7 @@ class Coin {
   final String symbol;
   final String name;
   final String image;
-  final double priceIdr;
+  final double price;
   final double change24h;
 
   Coin({
@@ -75,7 +90,7 @@ class Coin {
     required this.symbol,
     required this.name,
     required this.image,
-    required this.priceIdr,
+    required this.price,
     required this.change24h,
   });
 
@@ -85,7 +100,7 @@ class Coin {
       symbol: (json['symbol'] ?? '').toString().toUpperCase(),
       name: json['name'] ?? '',
       image: json['image'] ?? '',
-      priceIdr: (json['current_price'] ?? 0).toDouble(),
+      price: (json['current_price'] ?? 0).toDouble(),
       change24h: (json['price_change_percentage_24h'] ?? 0).toDouble(),
     );
   }
@@ -108,11 +123,12 @@ class _HomePageState extends State<HomePage> {
   Set<String> _favorites = {};
   Timer? _autoTimer;
   DateTime? _lastUpdate;
+  String _currency = 'idr';
 
   @override
   void initState() {
     super.initState();
-    _loadFavorites();
+    _loadPrefs();
     _fetchCoins();
     _searchCtrl.addListener(_applyFilter);
     _autoTimer = Timer.periodic(
@@ -128,11 +144,20 @@ class _HomePageState extends State<HomePage> {
     super.dispose();
   }
 
-  Future<void> _loadFavorites() async {
+  Future<void> _loadPrefs() async {
     final prefs = await SharedPreferences.getInstance();
     setState(() {
       _favorites = (prefs.getStringList('favorites') ?? []).toSet();
+      _currency = prefs.getString('currency') ?? 'idr';
     });
+  }
+
+  Future<void> _setCurrency(String currency) async {
+    if (currency == _currency) return;
+    final prefs = await SharedPreferences.getInstance();
+    setState(() => _currency = currency);
+    await prefs.setString('currency', currency);
+    _fetchCoins();
   }
 
   Future<void> _toggleFavorite(String id) async {
@@ -158,7 +183,7 @@ class _HomePageState extends State<HomePage> {
     try {
       final url = Uri.parse(
         'https://api.coingecko.com/api/v3/coins/markets'
-        '?vs_currency=idr&order=market_cap_desc&per_page=50&page=1'
+        '?vs_currency=$_currency&order=market_cap_desc&per_page=50&page=1'
         '&price_change_percentage=24h',
       );
       final res = await http.get(url).timeout(const Duration(seconds: 20));
@@ -215,7 +240,7 @@ class _HomePageState extends State<HomePage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Crypto ke IDR',
+        title: const Text('Crypto Converter',
             style: TextStyle(fontWeight: FontWeight.bold)),
         actions: [
           IconButton(
@@ -240,6 +265,20 @@ class _HomePageState extends State<HomePage> {
                   borderSide: BorderSide.none,
                 ),
               ),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 4, 12, 4),
+            child: Row(
+              children: [
+                Expanded(
+                  child: _currencyButton('idr', 'IDR (Rp)'),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: _currencyButton('usd', 'USD (\$)'),
+                ),
+              ],
             ),
           ),
           Padding(
@@ -269,6 +308,28 @@ class _HomePageState extends State<HomePage> {
           ),
           Expanded(child: _buildBody()),
         ],
+      ),
+    );
+  }
+
+  Widget _currencyButton(String value, String label) {
+    final selected = _currency == value;
+    return GestureDetector(
+      onTap: () => _setCurrency(value),
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 10),
+        decoration: BoxDecoration(
+          color: selected ? const Color(0xFFF0B90B) : const Color(0xFF161B22),
+          borderRadius: BorderRadius.circular(10),
+        ),
+        alignment: Alignment.center,
+        child: Text(
+          label,
+          style: TextStyle(
+            color: selected ? Colors.black : Colors.white,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
       ),
     );
   }
@@ -322,7 +383,7 @@ class _HomePageState extends State<HomePage> {
                   mainAxisAlignment: MainAxisAlignment.center,
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
-                    Text(formatIdr(c.priceIdr),
+                    Text(formatCurrency(c.price, _currency),
                         style:
                             const TextStyle(fontWeight: FontWeight.bold)),
                     Text(
@@ -349,7 +410,7 @@ class _HomePageState extends State<HomePage> {
               Navigator.push(
                 context,
                 MaterialPageRoute(
-                  builder: (_) => DetailPage(coin: c),
+                  builder: (_) => DetailPage(coin: c, currency: _currency),
                 ),
               );
             },
@@ -362,8 +423,9 @@ class _HomePageState extends State<HomePage> {
 
 class DetailPage extends StatefulWidget {
   final Coin coin;
+  final String currency;
 
-  const DetailPage({super.key, required this.coin});
+  const DetailPage({super.key, required this.coin, required this.currency});
 
   @override
   State<DetailPage> createState() => _DetailPageState();
@@ -371,8 +433,9 @@ class DetailPage extends StatefulWidget {
 
 class _DetailPageState extends State<DetailPage> {
   final _cryptoCtrl = TextEditingController(text: '1');
-  final _idrCtrl = TextEditingController();
+  final _fiatCtrl = TextEditingController();
   bool _syncing = false;
+  bool _swapped = false;
 
   final List<Map<String, String>> _timeframes = [
     {'label': '1D', 'days': '1'},
@@ -389,20 +452,23 @@ class _DetailPageState extends State<DetailPage> {
   bool _chartLoading = true;
   String? _chartError;
 
+  String get _fiatLabel => widget.currency == 'usd' ? 'USD' : 'Rupiah';
+  String get _fiatPrefix => widget.currency == 'usd' ? '\$ ' : 'Rp ';
+
   @override
   void initState() {
     super.initState();
-    _idrCtrl.text = widget.coin.priceIdr
-        .toStringAsFixed(widget.coin.priceIdr < 100 ? 2 : 0);
+    final p = widget.coin.price;
+    _fiatCtrl.text = p.toStringAsFixed(p < 100 ? 2 : 0);
     _cryptoCtrl.addListener(_fromCrypto);
-    _idrCtrl.addListener(_fromIdr);
+    _fiatCtrl.addListener(_fromFiat);
     _fetchChart();
   }
 
   @override
   void dispose() {
     _cryptoCtrl.dispose();
-    _idrCtrl.dispose();
+    _fiatCtrl.dispose();
     super.dispose();
   }
 
@@ -411,27 +477,27 @@ class _DetailPageState extends State<DetailPage> {
     _syncing = true;
     final amount =
         double.tryParse(_cryptoCtrl.text.replaceAll(',', '.')) ?? 0;
-    final idr = amount * widget.coin.priceIdr;
-    _idrCtrl.text = idr == 0 ? '' : idr.toStringAsFixed(idr < 100 ? 2 : 0);
+    final fiat = amount * widget.coin.price;
+    _fiatCtrl.text = fiat == 0 ? '' : fiat.toStringAsFixed(fiat < 100 ? 2 : 0);
     _syncing = false;
     setState(() {});
   }
 
-  void _fromIdr() {
+  void _fromFiat() {
     if (_syncing) return;
     _syncing = true;
-    final idr = double.tryParse(_idrCtrl.text.replaceAll(',', '.')) ?? 0;
-    final amount =
-        widget.coin.priceIdr == 0 ? 0.0 : idr / widget.coin.priceIdr;
+    final fiat = double.tryParse(_fiatCtrl.text.replaceAll(',', '.')) ?? 0;
+    final amount = widget.coin.price == 0 ? 0.0 : fiat / widget.coin.price;
     _cryptoCtrl.text = amount == 0 ? '' : amount.toStringAsFixed(8);
     _syncing = false;
     setState(() {});
   }
 
   Future<void> _fetchChart() async {
-    if (_chartCache.containsKey(_selectedDays)) {
+    final cacheKey = '${widget.currency}_$_selectedDays';
+    if (_chartCache.containsKey(cacheKey)) {
       setState(() {
-        _chartData = _chartCache[_selectedDays];
+        _chartData = _chartCache[cacheKey];
         _chartLoading = false;
         _chartError = null;
       });
@@ -444,7 +510,7 @@ class _DetailPageState extends State<DetailPage> {
     try {
       final url = Uri.parse(
         'https://api.coingecko.com/api/v3/coins/${widget.coin.id}/market_chart'
-        '?vs_currency=idr&days=$_selectedDays',
+        '?vs_currency=${widget.currency}&days=$_selectedDays',
       );
       final res = await http.get(url).timeout(const Duration(seconds: 20));
       if (res.statusCode == 200) {
@@ -452,7 +518,7 @@ class _DetailPageState extends State<DetailPage> {
         final List prices = data['prices'] ?? [];
         final points =
             prices.map<double>((p) => (p[1] as num).toDouble()).toList();
-        _chartCache[_selectedDays] = points;
+        _chartCache[cacheKey] = points;
         setState(() {
           _chartData = points;
           _chartLoading = false;
@@ -519,7 +585,7 @@ class _DetailPageState extends State<DetailPage> {
                 style: const TextStyle(fontSize: 16, color: Colors.grey)),
             const SizedBox(height: 4),
             Text(
-              formatIdr(c.priceIdr),
+              formatCurrency(c.price, widget.currency),
               style: const TextStyle(
                   fontSize: 28, fontWeight: FontWeight.bold),
             ),
@@ -543,12 +609,12 @@ class _DetailPageState extends State<DetailPage> {
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Text(
-                    'Low: ${formatIdrShort(_chartData!.reduce((a, b) => a < b ? a : b))}',
+                    'Low: ${formatCurrencyShort(_chartData!.reduce((a, b) => a < b ? a : b), widget.currency)}',
                     style: const TextStyle(
                         color: Colors.redAccent, fontSize: 12),
                   ),
                   Text(
-                    'High: ${formatIdrShort(_chartData!.reduce((a, b) => a > b ? a : b))}',
+                    'High: ${formatCurrencyShort(_chartData!.reduce((a, b) => a > b ? a : b), widget.currency)}',
                     style: const TextStyle(
                         color: Colors.greenAccent, fontSize: 12),
                   ),
@@ -581,52 +647,27 @@ class _DetailPageState extends State<DetailPage> {
               ),
             ),
             const SizedBox(height: 24),
-            Text('Jumlah ${c.symbol}',
-                style: const TextStyle(color: Colors.grey)),
+            if (!_swapped) _buildCryptoField(c) else _buildFiatField(),
             const SizedBox(height: 8),
-            TextField(
-              controller: _cryptoCtrl,
-              keyboardType:
-                  const TextInputType.numberWithOptions(decimal: true),
-              style: const TextStyle(fontSize: 22),
-              decoration: InputDecoration(
-                filled: true,
-                fillColor: const Color(0xFF161B22),
-                suffixText: c.symbol,
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide: BorderSide.none,
+            Center(
+              child: IconButton(
+                onPressed: () => setState(() => _swapped = !_swapped),
+                icon: const Icon(Icons.swap_vert, color: Color(0xFFF0B90B)),
+                style: IconButton.styleFrom(
+                  backgroundColor: const Color(0xFF161B22),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
                 ),
               ),
             ),
             const SizedBox(height: 8),
-            const Center(
-              child: Icon(Icons.swap_vert, color: Colors.grey),
-            ),
-            const SizedBox(height: 8),
-            const Text('Jumlah Rupiah',
-                style: TextStyle(color: Colors.grey)),
-            const SizedBox(height: 8),
-            TextField(
-              controller: _idrCtrl,
-              keyboardType:
-                  const TextInputType.numberWithOptions(decimal: true),
-              style: const TextStyle(fontSize: 22),
-              decoration: InputDecoration(
-                filled: true,
-                fillColor: const Color(0xFF161B22),
-                prefixText: 'Rp ',
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide: BorderSide.none,
-                ),
-              ),
-            ),
+            if (!_swapped) _buildFiatField() else _buildCryptoField(c),
             const SizedBox(height: 16),
             OutlinedButton.icon(
               onPressed: () {
                 final text =
-                    '${_cryptoCtrl.text} ${c.symbol} = Rp ${_idrCtrl.text}';
+                    '${_cryptoCtrl.text} ${c.symbol} = $_fiatPrefix${_fiatCtrl.text}';
                 Clipboard.setData(ClipboardData(text: text));
                 ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(
@@ -639,6 +680,58 @@ class _DetailPageState extends State<DetailPage> {
           ],
         ),
       ),
+    );
+  }
+
+  Widget _buildCryptoField(Coin c) {
+    return Column(
+      key: const ValueKey('crypto_field'),
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text('Jumlah ${c.symbol}',
+            style: const TextStyle(color: Colors.grey)),
+        const SizedBox(height: 8),
+        TextField(
+          controller: _cryptoCtrl,
+          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          style: const TextStyle(fontSize: 22),
+          decoration: InputDecoration(
+            filled: true,
+            fillColor: const Color(0xFF161B22),
+            suffixText: c.symbol,
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide.none,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildFiatField() {
+    return Column(
+      key: const ValueKey('fiat_field'),
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text('Jumlah $_fiatLabel',
+            style: const TextStyle(color: Colors.grey)),
+        const SizedBox(height: 8),
+        TextField(
+          controller: _fiatCtrl,
+          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          style: const TextStyle(fontSize: 22),
+          decoration: InputDecoration(
+            filled: true,
+            fillColor: const Color(0xFF161B22),
+            prefixText: _fiatPrefix,
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide.none,
+            ),
+          ),
+        ),
+      ],
     );
   }
 
