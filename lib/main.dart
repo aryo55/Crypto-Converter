@@ -35,73 +35,165 @@ class CryptoConverterApp extends StatelessWidget {
   }
 }
 
-String formatCurrency(double value, String currency) {
-  if (currency == 'usd') {
-    final isSmall = value < 1;
-    final s = value.toStringAsFixed(isSmall ? 6 : 2);
-    final parts = s.split('.');
-    final buf = StringBuffer();
-    final digits = parts[0];
-    for (int i = 0; i < digits.length; i++) {
-      buf.write(digits[i]);
-      final remaining = digits.length - i - 1;
-      if (remaining > 0 && remaining % 3 == 0) buf.write(',');
-    }
-    return '\$${buf.toString()}.${parts[1]}';
+// ---------------------------------------------------------------------------
+// Currency metadata (world currencies, used to convert from USD/USDT rates
+// returned by the forex API into whatever the user picks).
+// ---------------------------------------------------------------------------
+
+const Map<String, String> currencySymbols = {
+  'USD': '\$', 'IDR': 'Rp', 'EUR': '€', 'GBP': '£', 'JPY': '¥', 'CNY': '¥',
+  'KRW': '₩', 'INR': '₹', 'SGD': 'S\$', 'MYR': 'RM', 'THB': '฿', 'AUD': 'A\$',
+  'CAD': 'C\$', 'CHF': 'CHF', 'HKD': 'HK\$', 'PHP': '₱', 'VND': '₫',
+  'RUB': '₽', 'BRL': 'R\$', 'MXN': 'MX\$', 'ZAR': 'R', 'AED': 'د.إ',
+  'SAR': '﷼', 'TRY': '₺', 'NGN': '₦', 'PKR': '₨', 'BDT': '৳', 'EGP': 'E£',
+  'ARS': 'AR\$', 'CLP': 'CL\$', 'COP': 'CO\$', 'PLN': 'zł', 'SEK': 'kr',
+  'NOK': 'kr', 'DKK': 'kr', 'CZK': 'Kč', 'HUF': 'Ft', 'ILS': '₪',
+  'QAR': 'ر.ق', 'KWD': 'د.ك', 'BHD': '.د.ب', 'OMR': 'ر.ع.', 'JOD': 'د.ا',
+  'LKR': 'Rs', 'NPR': 'Rs', 'MMK': 'K', 'KHR': '៛', 'LAK': '₭',
+  'BND': 'B\$', 'TWD': 'NT\$', 'UAH': '₴', 'KZT': '₸', 'GEL': '₾',
+  'NZD': 'NZ\$', 'PGK': 'K', 'FJD': 'FJ\$', 'MAD': 'د.م.', 'KES': 'KSh',
+  'GHS': 'GH₵', 'TZS': 'TSh',
+};
+
+const Map<String, String> currencyNames = {
+  'USD': 'US Dollar', 'IDR': 'Indonesian Rupiah', 'EUR': 'Euro',
+  'GBP': 'British Pound', 'JPY': 'Japanese Yen', 'CNY': 'Chinese Yuan',
+  'KRW': 'South Korean Won', 'INR': 'Indian Rupee', 'SGD': 'Singapore Dollar',
+  'MYR': 'Malaysian Ringgit', 'THB': 'Thai Baht', 'AUD': 'Australian Dollar',
+  'CAD': 'Canadian Dollar', 'CHF': 'Swiss Franc', 'HKD': 'Hong Kong Dollar',
+  'PHP': 'Philippine Peso', 'VND': 'Vietnamese Dong', 'RUB': 'Russian Ruble',
+  'BRL': 'Brazilian Real', 'MXN': 'Mexican Peso', 'ZAR': 'South African Rand',
+  'AED': 'UAE Dirham', 'SAR': 'Saudi Riyal', 'TRY': 'Turkish Lira',
+  'NGN': 'Nigerian Naira', 'PKR': 'Pakistani Rupee', 'BDT': 'Bangladeshi Taka',
+  'EGP': 'Egyptian Pound', 'ARS': 'Argentine Peso', 'CLP': 'Chilean Peso',
+  'COP': 'Colombian Peso', 'PLN': 'Polish Zloty', 'SEK': 'Swedish Krona',
+  'NOK': 'Norwegian Krone', 'DKK': 'Danish Krone', 'CZK': 'Czech Koruna',
+  'HUF': 'Hungarian Forint', 'ILS': 'Israeli Shekel', 'QAR': 'Qatari Riyal',
+  'KWD': 'Kuwaiti Dinar', 'BHD': 'Bahraini Dinar', 'OMR': 'Omani Rial',
+  'JOD': 'Jordanian Dinar', 'LKR': 'Sri Lankan Rupee', 'NPR': 'Nepalese Rupee',
+  'MMK': 'Myanmar Kyat', 'KHR': 'Cambodian Riel', 'LAK': 'Lao Kip',
+  'BND': 'Brunei Dollar', 'TWD': 'Taiwan Dollar', 'UAH': 'Ukrainian Hryvnia',
+  'KZT': 'Kazakhstani Tenge', 'GEL': 'Georgian Lari',
+  'NZD': 'New Zealand Dollar', 'PGK': 'Papua New Guinean Kina',
+  'FJD': 'Fijian Dollar', 'MAD': 'Moroccan Dirham', 'KES': 'Kenyan Shilling',
+  'GHS': 'Ghanaian Cedi', 'TZS': 'Tanzanian Shilling',
+};
+
+// Currencies conventionally displayed without decimal places.
+const List<String> _zeroDecimalCurrencies = [
+  'IDR', 'JPY', 'KRW', 'VND', 'CLP', 'HUF', 'MMK', 'KHR', 'LAK', 'PYG', 'ISK',
+];
+
+String formatCurrency(double value, String currencyCode) {
+  final isIdr = currencyCode == 'IDR';
+  final symbol = currencySymbols[currencyCode] ?? '$currencyCode ';
+  final zeroDecimal = _zeroDecimalCurrencies.contains(currencyCode);
+
+  int decimals;
+  if (zeroDecimal) {
+    decimals = (value != 0 && value < 1) ? 2 : 0;
+  } else if (value != 0 && value < 1) {
+    decimals = 6;
+  } else {
+    decimals = 2;
   }
-  // IDR
-  final isSmall = value < 100;
-  final s = value.toStringAsFixed(isSmall ? 2 : 0);
+
+  final s = value.toStringAsFixed(decimals);
   final parts = s.split('.');
-  final buf = StringBuffer();
   final digits = parts[0];
+  final buf = StringBuffer();
   for (int i = 0; i < digits.length; i++) {
     buf.write(digits[i]);
     final remaining = digits.length - i - 1;
-    if (remaining > 0 && remaining % 3 == 0) buf.write('.');
+    if (remaining > 0 && remaining % 3 == 0) {
+      buf.write(isIdr ? '.' : ',');
+    }
   }
-  var out = 'Rp ${buf.toString()}';
-  if (parts.length > 1) out += ',${parts[1]}';
+  var out = isIdr ? 'Rp ${buf.toString()}' : '$symbol${buf.toString()}';
+  if (parts.length > 1 && decimals > 0) {
+    out += (isIdr ? ',' : '.') + parts[1];
+  }
   return out;
 }
 
-String formatCurrencyShort(double value, String currency) {
-  final symbol = currency == 'usd' ? '\$' : 'Rp ';
+String formatCurrencyShort(double value, String currencyCode) {
+  final symbol = currencySymbols[currencyCode] ?? '$currencyCode ';
+  double v = value;
+  String suffix = '';
   if (value >= 1000000000) {
-    return '$symbol${(value / 1000000000).toStringAsFixed(2)} M';
+    v = value / 1000000000;
+    suffix = 'M';
   } else if (value >= 1000000) {
-    return '$symbol${(value / 1000000).toStringAsFixed(2)} jt';
+    v = value / 1000000;
+    suffix = 'jt';
   } else if (value >= 1000) {
-    return '$symbol${(value / 1000).toStringAsFixed(1)} rb';
+    v = value / 1000;
+    suffix = 'rb';
   }
-  return '$symbol${value.toStringAsFixed(value < 100 ? 2 : 0)}';
+  final decimals = suffix.isEmpty ? (value < 100 ? 2 : 0) : 2;
+  return '$symbol${v.toStringAsFixed(decimals)}$suffix';
 }
 
+// ---------------------------------------------------------------------------
+// Friendly names for common coins (Binance only gives us ticker symbols).
+// Anything not in this map just falls back to showing its symbol as name.
+// ---------------------------------------------------------------------------
+
+const Map<String, String> coinNames = {
+  'BTC': 'Bitcoin', 'ETH': 'Ethereum', 'BNB': 'BNB', 'SOL': 'Solana',
+  'XRP': 'XRP', 'ADA': 'Cardano', 'DOGE': 'Dogecoin', 'TRX': 'TRON',
+  'AVAX': 'Avalanche', 'DOT': 'Polkadot', 'MATIC': 'Polygon',
+  'LINK': 'Chainlink', 'LTC': 'Litecoin', 'SHIB': 'Shiba Inu',
+  'ATOM': 'Cosmos', 'UNI': 'Uniswap', 'XLM': 'Stellar',
+  'ETC': 'Ethereum Classic', 'FIL': 'Filecoin', 'APT': 'Aptos',
+  'ARB': 'Arbitrum', 'OP': 'Optimism', 'NEAR': 'NEAR Protocol',
+  'VET': 'VeChain', 'ICP': 'Internet Computer', 'ALGO': 'Algorand',
+  'HBAR': 'Hedera', 'SAND': 'The Sandbox', 'MANA': 'Decentraland',
+  'AAVE': 'Aave', 'EOS': 'EOS', 'XTZ': 'Tezos', 'THETA': 'Theta Network',
+  'EGLD': 'MultiversX', 'FTM': 'Fantom', 'RUNE': 'THORChain',
+  'GRT': 'The Graph', 'CHZ': 'Chiliz', 'KAVA': 'Kava', 'ZEC': 'Zcash',
+  'DASH': 'Dash', 'WAVES': 'Waves', 'COMP': 'Compound', 'MKR': 'Maker',
+  'SNX': 'Synthetix', 'CRV': 'Curve DAO', 'SUI': 'Sui', 'PEPE': 'Pepe',
+  'WIF': 'dogwifhat', 'INJ': 'Injective', 'TIA': 'Celestia', 'SEI': 'Sei',
+  'RNDR': 'Render', 'TON': 'Toncoin', 'USDC': 'USD Coin',
+  'FDUSD': 'First Digital USD', 'TUSD': 'TrueUSD', 'DAI': 'Dai',
+  'BONK': 'Bonk', 'FLOKI': 'Floki', 'GALA': 'Gala', 'IMX': 'Immutable',
+  'STX': 'Stacks', 'ORDI': 'Ordi', 'JUP': 'Jupiter', 'PYTH': 'Pyth Network',
+};
+
 class Coin {
-  final String id;
-  final String symbol;
+  final String symbol; // base asset, e.g. "BTC"
   final String name;
   final String image;
-  final double price;
+  final double priceUsd; // price quoted against USDT on Binance
   final double change24h;
+  final double quoteVolume;
 
   Coin({
-    required this.id,
     required this.symbol,
     required this.name,
     required this.image,
-    required this.price,
+    required this.priceUsd,
     required this.change24h,
+    required this.quoteVolume,
   });
 
-  factory Coin.fromJson(Map<String, dynamic> json) {
+  /// Used as a stable key for favorites and as the Binance pair prefix.
+  String get id => symbol;
+
+  factory Coin.fromBinanceTicker(Map<String, dynamic> json) {
+    final rawSymbol = json['symbol'] as String; // e.g. "BTCUSDT"
+    final base = rawSymbol.substring(0, rawSymbol.length - 4);
     return Coin(
-      id: json['id'] ?? '',
-      symbol: (json['symbol'] ?? '').toString().toUpperCase(),
-      name: json['name'] ?? '',
-      image: json['image'] ?? '',
-      price: (json['current_price'] ?? 0).toDouble(),
-      change24h: (json['price_change_percentage_24h'] ?? 0).toDouble(),
+      symbol: base,
+      name: coinNames[base] ?? base,
+      image:
+          'https://cdn.jsdelivr.net/gh/atomiclabs/cryptocurrency-icons@master/128/color/${base.toLowerCase()}.png',
+      priceUsd: double.tryParse(json['lastPrice']?.toString() ?? '') ?? 0,
+      change24h:
+          double.tryParse(json['priceChangePercent']?.toString() ?? '') ?? 0,
+      quoteVolume:
+          double.tryParse(json['quoteVolume']?.toString() ?? '') ?? 0,
     );
   }
 }
@@ -123,18 +215,20 @@ class _HomePageState extends State<HomePage> {
   Set<String> _favorites = {};
   Timer? _autoTimer;
   DateTime? _lastUpdate;
-  String _currency = 'idr';
+
+  String _currency = 'USD';
+  Map<String, double> _rates = {'USD': 1.0};
+  DateTime? _ratesFetchedAt;
 
   @override
   void initState() {
     super.initState();
     _loadPrefs();
-    _fetchCoins();
     _searchCtrl.addListener(_applyFilter);
-    _autoTimer = Timer.periodic(
-      const Duration(seconds: 60),
-      (_) => _fetchCoins(silent: true),
-    );
+    _autoTimer = Timer.periodic(const Duration(seconds: 60), (_) {
+      _fetchCoins(silent: true);
+      _maybeRefreshRates();
+    });
   }
 
   @override
@@ -146,10 +240,51 @@ class _HomePageState extends State<HomePage> {
 
   Future<void> _loadPrefs() async {
     final prefs = await SharedPreferences.getInstance();
+    final cachedRates = prefs.getString('rates_cache');
     setState(() {
       _favorites = (prefs.getStringList('favorites') ?? []).toSet();
-      _currency = prefs.getString('currency') ?? 'idr';
+      _currency = prefs.getString('currency') ?? 'USD';
+      if (cachedRates != null) {
+        try {
+          final decoded = Map<String, dynamic>.from(jsonDecode(cachedRates));
+          _rates = decoded.map((k, v) => MapEntry(k, (v as num).toDouble()));
+        } catch (_) {
+          // ignore malformed cache
+        }
+      }
     });
+    await _fetchRates();
+    await _fetchCoins();
+  }
+
+  Future<void> _fetchRates() async {
+    try {
+      final res = await http
+          .get(Uri.parse('https://open.er-api.com/v6/latest/USD'))
+          .timeout(const Duration(seconds: 15));
+      if (res.statusCode == 200) {
+        final data = jsonDecode(res.body);
+        if (data['result'] == 'success' && data['rates'] != null) {
+          final rates = Map<String, dynamic>.from(data['rates']);
+          final parsed =
+              rates.map((k, v) => MapEntry(k, (v as num).toDouble()));
+          setState(() => _rates = parsed);
+          _ratesFetchedAt = DateTime.now();
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.setString('rates_cache', jsonEncode(parsed));
+        }
+      }
+    } catch (_) {
+      // Keep using whatever rates we already have (cached or USD-only).
+    }
+  }
+
+  Future<void> _maybeRefreshRates() async {
+    if (_ratesFetchedAt == null ||
+        DateTime.now().difference(_ratesFetchedAt!) >
+            const Duration(minutes: 10)) {
+      await _fetchRates();
+    }
   }
 
   Future<void> _setCurrency(String currency) async {
@@ -157,7 +292,8 @@ class _HomePageState extends State<HomePage> {
     final prefs = await SharedPreferences.getInstance();
     setState(() => _currency = currency);
     await prefs.setString('currency', currency);
-    _fetchCoins();
+    // No need to refetch coins: prices are already cached in USD and we
+    // just recompute the display value with the new rate.
   }
 
   Future<void> _toggleFavorite(String id) async {
@@ -181,21 +317,32 @@ class _HomePageState extends State<HomePage> {
       });
     }
     try {
-      final url = Uri.parse(
-        'https://api.coingecko.com/api/v3/coins/markets'
-        '?vs_currency=$_currency&order=market_cap_desc&per_page=50&page=1'
-        '&price_change_percentage=24h',
-      );
+      final url = Uri.parse('https://api.binance.com/api/v3/ticker/24hr');
       final res = await http.get(url).timeout(const Duration(seconds: 20));
       if (res.statusCode == 200) {
         final List data = jsonDecode(res.body);
+        final list = data.where((e) {
+          final s = (e['symbol'] as String?) ?? '';
+          if (!s.endsWith('USDT')) return false;
+          final base = s.substring(0, s.length - 4);
+          if (base.isEmpty) return false;
+          if (RegExp(r'(UP|DOWN|BULL|BEAR)$').hasMatch(base)) return false;
+          if (RegExp(r'[0-9]').hasMatch(base)) return false;
+          return true;
+        }).map((e) => Coin.fromBinanceTicker(e)).toList();
+        list.sort((a, b) => b.quoteVolume.compareTo(a.quoteVolume));
         setState(() {
-          _coins = data.map((e) => Coin.fromJson(e)).toList();
+          _coins = list.take(60).toList();
           _loading = false;
           _error = null;
           _lastUpdate = DateTime.now();
         });
         _applyFilter();
+      } else if (res.statusCode == 429 && !silent) {
+        setState(() {
+          _error = 'Terlalu banyak request ke Binance. Tunggu sebentar.';
+          _loading = false;
+        });
       } else if (!silent) {
         setState(() {
           _error = 'Server error (${res.statusCode}). Coba lagi sebentar.';
@@ -229,11 +376,99 @@ class _HomePageState extends State<HomePage> {
     setState(() => _filtered = list);
   }
 
+  double _rateFor(String code) => _rates[code] ?? 1.0;
+
+  double _priceIn(Coin c) => c.priceUsd * _rateFor(_currency);
+
   String get _updateLabel {
     if (_lastUpdate == null) return '';
     final t = _lastUpdate!;
     String two(int n) => n.toString().padLeft(2, '0');
     return 'Update ${two(t.hour)}:${two(t.minute)}:${two(t.second)}';
+  }
+
+  Future<void> _showCurrencyPicker() async {
+    final codes = _rates.keys.toList()..sort();
+    if (!codes.contains('USD')) codes.insert(0, 'USD');
+    String query = '';
+    final selected = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: const Color(0xFF161B22),
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) {
+        return StatefulBuilder(builder: (ctx, setModalState) {
+          final filtered = codes.where((code) {
+            final name = (currencyNames[code] ?? '').toLowerCase();
+            final q = query.toLowerCase();
+            return code.toLowerCase().contains(q) || name.contains(q);
+          }).toList();
+          return SizedBox(
+            height: MediaQuery.of(ctx).size.height * 0.75,
+            child: Column(
+              children: [
+                const Padding(
+                  padding: EdgeInsets.only(top: 12),
+                  child: Text('Pilih Mata Uang',
+                      style: TextStyle(fontWeight: FontWeight.bold)),
+                ),
+                Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: TextField(
+                    decoration: InputDecoration(
+                      hintText: 'Cari kode atau nama mata uang...',
+                      prefixIcon: const Icon(Icons.search),
+                      filled: true,
+                      fillColor: const Color(0xFF0D1117),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: BorderSide.none,
+                      ),
+                    ),
+                    onChanged: (v) => setModalState(() => query = v),
+                  ),
+                ),
+                Expanded(
+                  child: ListView.builder(
+                    itemCount: filtered.length,
+                    itemBuilder: (_, i) {
+                      final code = filtered[i];
+                      final isSelected = code == _currency;
+                      return ListTile(
+                        leading: SizedBox(
+                          width: 32,
+                          child: Text(
+                            currencySymbols[code] ?? code,
+                            style: const TextStyle(fontSize: 16),
+                            textAlign: TextAlign.center,
+                          ),
+                        ),
+                        title: Text(code,
+                            style:
+                                const TextStyle(fontWeight: FontWeight.w600)),
+                        subtitle: Text(
+                          currencyNames[code] ?? '',
+                          style:
+                              const TextStyle(color: Colors.grey, fontSize: 12),
+                        ),
+                        trailing: isSelected
+                            ? const Icon(Icons.check,
+                                color: Color(0xFFF0B90B))
+                            : null,
+                        onTap: () => Navigator.pop(ctx, code),
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ),
+          );
+        });
+      },
+    );
+    if (selected != null) _setCurrency(selected);
   }
 
   @override
@@ -269,16 +504,33 @@ class _HomePageState extends State<HomePage> {
           ),
           Padding(
             padding: const EdgeInsets.fromLTRB(12, 4, 12, 4),
-            child: Row(
-              children: [
-                Expanded(
-                  child: _currencyButton('idr', 'IDR (Rp)'),
+            child: GestureDetector(
+              onTap: _showCurrencyPicker,
+              child: Container(
+                width: double.infinity,
+                padding:
+                    const EdgeInsets.symmetric(vertical: 12, horizontal: 14),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF161B22),
+                  borderRadius: BorderRadius.circular(10),
                 ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: _currencyButton('usd', 'USD (\$)'),
+                child: Row(
+                  children: [
+                    const Icon(Icons.public,
+                        size: 18, color: Color(0xFFF0B90B)),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        '$_currency  •  ${currencyNames[_currency] ?? _currency}',
+                        style: const TextStyle(fontWeight: FontWeight.w600),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    const Icon(Icons.keyboard_arrow_down,
+                        size: 20, color: Colors.grey),
+                  ],
                 ),
-              ],
+              ),
             ),
           ),
           Padding(
@@ -312,28 +564,6 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  Widget _currencyButton(String value, String label) {
-    final selected = _currency == value;
-    return GestureDetector(
-      onTap: () => _setCurrency(value),
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 10),
-        decoration: BoxDecoration(
-          color: selected ? const Color(0xFFF0B90B) : const Color(0xFF161B22),
-          borderRadius: BorderRadius.circular(10),
-        ),
-        alignment: Alignment.center,
-        child: Text(
-          label,
-          style: TextStyle(
-            color: selected ? Colors.black : Colors.white,
-            fontWeight: FontWeight.w600,
-          ),
-        ),
-      ),
-    );
-  }
-
   Widget _buildBody() {
     if (_loading) {
       return const Center(child: CircularProgressIndicator());
@@ -354,7 +584,10 @@ class _HomePageState extends State<HomePage> {
       );
     }
     return RefreshIndicator(
-      onRefresh: () => _fetchCoins(),
+      onRefresh: () async {
+        await _fetchRates();
+        await _fetchCoins();
+      },
       child: ListView.builder(
         itemCount: _filtered.length,
         itemBuilder: (context, i) {
@@ -383,7 +616,7 @@ class _HomePageState extends State<HomePage> {
                   mainAxisAlignment: MainAxisAlignment.center,
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
-                    Text(formatCurrency(c.price, _currency),
+                    Text(formatCurrency(_priceIn(c), _currency),
                         style:
                             const TextStyle(fontWeight: FontWeight.bold)),
                     Text(
@@ -410,7 +643,11 @@ class _HomePageState extends State<HomePage> {
               Navigator.push(
                 context,
                 MaterialPageRoute(
-                  builder: (_) => DetailPage(coin: c, currency: _currency),
+                  builder: (_) => DetailPage(
+                    coin: c,
+                    currency: _currency,
+                    rate: _rateFor(_currency),
+                  ),
                 ),
               );
             },
@@ -424,8 +661,14 @@ class _HomePageState extends State<HomePage> {
 class DetailPage extends StatefulWidget {
   final Coin coin;
   final String currency;
+  final double rate;
 
-  const DetailPage({super.key, required this.coin, required this.currency});
+  const DetailPage({
+    super.key,
+    required this.coin,
+    required this.currency,
+    required this.rate,
+  });
 
   @override
   State<DetailPage> createState() => _DetailPageState();
@@ -447,18 +690,22 @@ class _DetailPageState extends State<DetailPage> {
   ];
   String _selectedDays = '1';
 
+  // Chart data is in raw USDT prices from Binance klines, so it does NOT
+  // depend on the selected fiat currency — only the timeframe.
   final Map<String, List<double>> _chartCache = {};
   List<double>? _chartData;
   bool _chartLoading = true;
   String? _chartError;
 
-  String get _fiatLabel => widget.currency == 'usd' ? 'USD' : 'Rupiah';
-  String get _fiatPrefix => widget.currency == 'usd' ? '\$ ' : 'Rp ';
+  double get _price => widget.coin.priceUsd * widget.rate;
+  String get _fiatLabel => currencyNames[widget.currency] ?? widget.currency;
+  String get _fiatPrefix =>
+      '${currencySymbols[widget.currency] ?? widget.currency} ';
 
   @override
   void initState() {
     super.initState();
-    final p = widget.coin.price;
+    final p = _price;
     _fiatCtrl.text = p.toStringAsFixed(p < 100 ? 2 : 0);
     _cryptoCtrl.addListener(_fromCrypto);
     _fiatCtrl.addListener(_fromFiat);
@@ -477,7 +724,7 @@ class _DetailPageState extends State<DetailPage> {
     _syncing = true;
     final amount =
         double.tryParse(_cryptoCtrl.text.replaceAll(',', '.')) ?? 0;
-    final fiat = amount * widget.coin.price;
+    final fiat = amount * _price;
     _fiatCtrl.text = fiat == 0 ? '' : fiat.toStringAsFixed(fiat < 100 ? 2 : 0);
     _syncing = false;
     setState(() {});
@@ -487,14 +734,31 @@ class _DetailPageState extends State<DetailPage> {
     if (_syncing) return;
     _syncing = true;
     final fiat = double.tryParse(_fiatCtrl.text.replaceAll(',', '.')) ?? 0;
-    final amount = widget.coin.price == 0 ? 0.0 : fiat / widget.coin.price;
+    final amount = _price == 0 ? 0.0 : fiat / _price;
     _cryptoCtrl.text = amount == 0 ? '' : amount.toStringAsFixed(8);
     _syncing = false;
     setState(() {});
   }
 
+  Map<String, dynamic> _klineParamsFor(String days) {
+    switch (days) {
+      case '1':
+        return {'interval': '15m', 'limit': 96};
+      case '7':
+        return {'interval': '1h', 'limit': 168};
+      case '30':
+        return {'interval': '4h', 'limit': 180};
+      case '90':
+        return {'interval': '1d', 'limit': 90};
+      case '365':
+        return {'interval': '1d', 'limit': 365};
+      default: // 'max'
+        return {'interval': '1w', 'limit': 500};
+    }
+  }
+
   Future<void> _fetchChart() async {
-    final cacheKey = '${widget.currency}_$_selectedDays';
+    final cacheKey = _selectedDays;
     if (_chartCache.containsKey(cacheKey)) {
       setState(() {
         _chartData = _chartCache[cacheKey];
@@ -508,16 +772,18 @@ class _DetailPageState extends State<DetailPage> {
       _chartError = null;
     });
     try {
+      final params = _klineParamsFor(_selectedDays);
+      final symbol = '${widget.coin.symbol}USDT';
       final url = Uri.parse(
-        'https://api.coingecko.com/api/v3/coins/${widget.coin.id}/market_chart'
-        '?vs_currency=${widget.currency}&days=$_selectedDays',
+        'https://api.binance.com/api/v3/klines'
+        '?symbol=$symbol&interval=${params['interval']}&limit=${params['limit']}',
       );
       final res = await http.get(url).timeout(const Duration(seconds: 20));
       if (res.statusCode == 200) {
-        final data = jsonDecode(res.body);
-        final List prices = data['prices'] ?? [];
-        final points =
-            prices.map<double>((p) => (p[1] as num).toDouble()).toList();
+        final List data = jsonDecode(res.body);
+        final points = data
+            .map<double>((k) => double.tryParse(k[4].toString()) ?? 0)
+            .toList();
         _chartCache[cacheKey] = points;
         setState(() {
           _chartData = points;
@@ -585,7 +851,7 @@ class _DetailPageState extends State<DetailPage> {
                 style: const TextStyle(fontSize: 16, color: Colors.grey)),
             const SizedBox(height: 4),
             Text(
-              formatCurrency(c.price, widget.currency),
+              formatCurrency(_price, widget.currency),
               style: const TextStyle(
                   fontSize: 28, fontWeight: FontWeight.bold),
             ),
@@ -609,12 +875,12 @@ class _DetailPageState extends State<DetailPage> {
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Text(
-                    'Low: ${formatCurrencyShort(_chartData!.reduce((a, b) => a < b ? a : b), widget.currency)}',
+                    'Low: ${formatCurrencyShort(_chartData!.reduce((a, b) => a < b ? a : b) * widget.rate, widget.currency)}',
                     style: const TextStyle(
                         color: Colors.redAccent, fontSize: 12),
                   ),
                   Text(
-                    'High: ${formatCurrencyShort(_chartData!.reduce((a, b) => a > b ? a : b), widget.currency)}',
+                    'High: ${formatCurrencyShort(_chartData!.reduce((a, b) => a > b ? a : b) * widget.rate, widget.currency)}',
                     style: const TextStyle(
                         color: Colors.greenAccent, fontSize: 12),
                   ),
