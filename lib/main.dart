@@ -79,6 +79,32 @@ const Map<String, String> currencyNames = {
   'GHS': 'Ghanaian Cedi', 'TZS': 'Tanzanian Shilling',
 };
 
+// ISO-3166 alpha-2 country code for each currency, used to render a flag.
+const Map<String, String> currencyCountry = {
+  'USD': 'US', 'IDR': 'ID', 'EUR': 'EU', 'GBP': 'GB', 'JPY': 'JP',
+  'CNY': 'CN', 'KRW': 'KR', 'INR': 'IN', 'SGD': 'SG', 'MYR': 'MY',
+  'THB': 'TH', 'AUD': 'AU', 'CAD': 'CA', 'CHF': 'CH', 'HKD': 'HK',
+  'PHP': 'PH', 'VND': 'VN', 'RUB': 'RU', 'BRL': 'BR', 'MXN': 'MX',
+  'ZAR': 'ZA', 'AED': 'AE', 'SAR': 'SA', 'TRY': 'TR', 'NGN': 'NG',
+  'PKR': 'PK', 'BDT': 'BD', 'EGP': 'EG', 'ARS': 'AR', 'CLP': 'CL',
+  'COP': 'CO', 'PLN': 'PL', 'SEK': 'SE', 'NOK': 'NO', 'DKK': 'DK',
+  'CZK': 'CZ', 'HUF': 'HU', 'ILS': 'IL', 'QAR': 'QA', 'KWD': 'KW',
+  'BHD': 'BH', 'OMR': 'OM', 'JOD': 'JO', 'LKR': 'LK', 'NPR': 'NP',
+  'MMK': 'MM', 'KHR': 'KH', 'LAK': 'LA', 'BND': 'BN', 'TWD': 'TW',
+  'UAH': 'UA', 'KZT': 'KZ', 'GEL': 'GE', 'NZD': 'NZ', 'PGK': 'PG',
+  'FJD': 'FJ', 'MAD': 'MA', 'KES': 'KE', 'GHS': 'GH', 'TZS': 'TZ',
+};
+
+/// Builds a flag emoji from an ISO-3166 alpha-2 country code, e.g.
+/// "ID" -> "🇮🇩". This avoids depending on any external flag image CDN.
+String flagEmoji(String countryCode) {
+  if (countryCode.length != 2) return '🏳️';
+  final code = countryCode.toUpperCase();
+  const base = 0x1F1E6; // Regional Indicator Symbol Letter A
+  final chars = code.codeUnits.map((c) => base + (c - 65));
+  return String.fromCharCodes(chars);
+}
+
 // Currencies conventionally displayed without decimal places.
 const List<String> _zeroDecimalCurrencies = [
   'IDR', 'JPY', 'KRW', 'VND', 'CLP', 'HUF', 'MMK', 'KHR', 'LAK', 'PYG', 'ISK',
@@ -164,7 +190,6 @@ const Map<String, String> coinNames = {
 class Coin {
   final String symbol; // base asset, e.g. "BTC"
   final String name;
-  final String image;
   final double priceUsd; // price quoted against USDT on Binance
   final double change24h;
   final double quoteVolume;
@@ -172,7 +197,6 @@ class Coin {
   Coin({
     required this.symbol,
     required this.name,
-    required this.image,
     required this.priceUsd,
     required this.change24h,
     required this.quoteVolume,
@@ -187,13 +211,69 @@ class Coin {
     return Coin(
       symbol: base,
       name: coinNames[base] ?? base,
-      image:
-          'https://cdn.jsdelivr.net/gh/atomiclabs/cryptocurrency-icons@master/128/color/${base.toLowerCase()}.png',
       priceUsd: double.tryParse(json['lastPrice']?.toString() ?? '') ?? 0,
       change24h:
           double.tryParse(json['priceChangePercent']?.toString() ?? '') ?? 0,
       quoteVolume:
           double.tryParse(json['quoteVolume']?.toString() ?? '') ?? 0,
+    );
+  }
+}
+
+/// Renders a coin's logo, trying a couple of free icon CDNs in sequence
+/// before falling back to a generic placeholder icon. This gives much
+/// better coverage than relying on a single (often outdated) icon set.
+class CoinIcon extends StatefulWidget {
+  final String symbol;
+  final double size;
+
+  const CoinIcon({super.key, required this.symbol, this.size = 36});
+
+  @override
+  State<CoinIcon> createState() => _CoinIconState();
+}
+
+class _CoinIconState extends State<CoinIcon> {
+  int _sourceIndex = 0;
+
+  List<String> get _sources {
+    final s = widget.symbol.toLowerCase();
+    return [
+      'https://cdn.jsdelivr.net/gh/atomiclabs/cryptocurrency-icons@master/128/color/$s.png',
+      'https://assets.coincap.io/assets/icons/$s@2x.png',
+    ];
+  }
+
+  void _nextSource() {
+    if (!mounted) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) setState(() => _sourceIndex++);
+    });
+  }
+
+  @override
+  void didUpdateWidget(covariant CoinIcon old) {
+    super.didUpdateWidget(old);
+    if (old.symbol != widget.symbol) {
+      _sourceIndex = 0;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_sourceIndex >= _sources.length) {
+      return Icon(Icons.currency_bitcoin,
+          size: widget.size, color: Colors.grey);
+    }
+    return Image.network(
+      _sources[_sourceIndex],
+      key: ValueKey('${widget.symbol}_$_sourceIndex'),
+      width: widget.size,
+      height: widget.size,
+      errorBuilder: (_, __, ___) {
+        _nextSource();
+        return SizedBox(width: widget.size, height: widget.size);
+      },
     );
   }
 }
@@ -388,8 +468,10 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<void> _showCurrencyPicker() async {
-    final codes = _rates.keys.toList()..sort();
-    if (!codes.contains('USD')) codes.insert(0, 'USD');
+    // Only offer currencies we actually have a proper name for (and a live
+    // rate for) — no bare/unlabeled ISO codes in the list.
+    final codes = currencyNames.keys.where((c) => _rates.containsKey(c)).toList()
+      ..sort();
     String query = '';
     final selected = await showModalBottomSheet<String>(
       context: context,
@@ -440,8 +522,8 @@ class _HomePageState extends State<HomePage> {
                         leading: SizedBox(
                           width: 32,
                           child: Text(
-                            currencySymbols[code] ?? code,
-                            style: const TextStyle(fontSize: 16),
+                            flagEmoji(currencyCountry[code] ?? ''),
+                            style: const TextStyle(fontSize: 22),
                             textAlign: TextAlign.center,
                           ),
                         ),
@@ -516,8 +598,10 @@ class _HomePageState extends State<HomePage> {
                 ),
                 child: Row(
                   children: [
-                    const Icon(Icons.public,
-                        size: 18, color: Color(0xFFF0B90B)),
+                    Text(
+                      flagEmoji(currencyCountry[_currency] ?? ''),
+                      style: const TextStyle(fontSize: 18),
+                    ),
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
@@ -597,13 +681,7 @@ class _HomePageState extends State<HomePage> {
           return ListTile(
             leading: ClipRRect(
               borderRadius: BorderRadius.circular(20),
-              child: Image.network(
-                c.image,
-                width: 36,
-                height: 36,
-                errorBuilder: (_, __, ___) =>
-                    const Icon(Icons.currency_bitcoin, size: 36),
-              ),
+              child: CoinIcon(symbol: c.symbol, size: 36),
             ),
             title: Text(c.name,
                 style: const TextStyle(fontWeight: FontWeight.w600)),
@@ -829,13 +907,7 @@ class _DetailPageState extends State<DetailPage> {
           children: [
             ClipRRect(
               borderRadius: BorderRadius.circular(14),
-              child: Image.network(
-                c.image,
-                width: 28,
-                height: 28,
-                errorBuilder: (_, __, ___) =>
-                    const Icon(Icons.currency_bitcoin, size: 28),
-              ),
+              child: CoinIcon(symbol: c.symbol, size: 28),
             ),
             const SizedBox(width: 8),
             Text(c.symbol),
